@@ -30,6 +30,4 @@ public interface PatientService {
     List<CallInfo> callInfoFilter(String date, String department, String doctorName);
 
     void preheatCache();
-
-    int getCallInfoQuantity(Long callInfoId);
 }

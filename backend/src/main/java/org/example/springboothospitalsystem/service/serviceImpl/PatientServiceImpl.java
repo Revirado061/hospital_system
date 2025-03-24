@@ -9,15 +9,15 @@ import org.example.springboothospitalsystem.repository.PatientDao;
 import org.example.springboothospitalsystem.repository.RegistInfoDao;
 import org.example.springboothospitalsystem.service.PatientService;
 import org.example.springboothospitalsystem.utils.RedisCacheUtils;
+import org.example.springboothospitalsystem.utils.RedisLockUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.Set;
 
@@ -31,15 +31,20 @@ public class PatientServiceImpl implements PatientService {
     private RegistInfoDao registInfoDao;
     @Resource
     private LogDao logDao;
-
-    @Autowired
+    @Resource
     private RedisCacheUtils redisCacheUtils;
 
-    public PatientServiceImpl(PatientDao patientDao, CallInfoDao callInfoDao, RegistInfoDao registInfoDao, LogDao logDao) {
+    @Resource
+    private RedisLockUtils redisLockUtils;
+
+    @Autowired
+    public PatientServiceImpl(PatientDao patientDao, CallInfoDao callInfoDao, RegistInfoDao registInfoDao, LogDao logDao, RedisCacheUtils redisCacheUtils, RedisLockUtils redisLockUtils) {
         this.patientDao = patientDao;
         this.callInfoDao = callInfoDao;
         this.registInfoDao = registInfoDao;
         this.logDao = logDao;
+        this.redisCacheUtils = redisCacheUtils;
+        this.redisLockUtils = redisLockUtils;
     }
 
     @Override
@@ -88,48 +93,34 @@ public class PatientServiceImpl implements PatientService {
     }
 
     @Override
-    @Transactional
     public void guahao(Long id, String account) {
-        // 从 Redis 缓存中获取 CallInfo 对象
-        String key = "callInfo:" + id;
-        CallInfo callInfo = (CallInfo) redisCacheUtils.get(key);
-        if (callInfo == null) {
-            // 如果缓存中没有，从数据库中获取
-            callInfo = callInfoDao.findById(id).orElse(null);
-            if (callInfo != null) {
-                // 更新缓存
-                redisCacheUtils.set(key, callInfo, 60, TimeUnit.MINUTES);
-            }
-        }
-
-        if (callInfo != null && callInfo.getQuantity() > 0) {
-            int currentVersion = callInfo.getVersion();
-            callInfo.setQuantity(callInfo.getQuantity() - 1);
-            callInfo.setVersion(currentVersion + 1);
-
-            // 更新数据库
-            int updated = callInfoDao.updateQuantityByVersion(id, callInfo.getQuantity(), currentVersion);
-            if (updated > 0) {
-                // 更新成功
-                LocalDateTime today = LocalDateTime.now();
-                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-                String registerTime = today.format(formatter);
-                String date = callInfo.getDate();
-                String timeFrame = callInfo.getTimeFrame();
-                String department = callInfo.getDepartment();
-                String patientName = patientDao.findByAccount(account).getName();
-                String doctorName = callInfo.getName();
-                RegistInfo registInfo = new RegistInfo(date, timeFrame, department, patientName, doctorName, registerTime);
-                registInfoDao.save(registInfo);
-
-                // 更新缓存
-                redisCacheUtils.set(key, callInfo, 60, TimeUnit.MINUTES);
+        String lockKey = "lock:callInfo:" + id; // 锁的键
+        String lockValue = UUID.randomUUID().toString(); // 锁的值，用于标识锁的持有者
+        try {
+            // 尝试获取锁
+            if (redisLockUtils.tryLock(lockKey, lockValue, 30, TimeUnit.SECONDS)) {
+                CallInfo callInfo = callInfoDao.findById(id).orElse(null);
+                if (callInfo != null && callInfo.getQuantity() > 0) {
+                    callInfo.setQuantity(callInfo.getQuantity() - 1);
+                    callInfoDao.save(callInfo);
+                    LocalDateTime today = LocalDateTime.now();
+                    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+                    String registerTime = today.format(formatter);
+                    String date = callInfo.getDate();
+                    String timeFrame = callInfo.getTimeFrame();
+                    String department = callInfo.getDepartment();
+                    String patientName = patientDao.findByAccount(account).getName();
+                    String doctorName = callInfo.getName();
+                    RegistInfo registInfo = new RegistInfo(date, timeFrame, department, patientName, doctorName, registerTime);
+                    registInfoDao.save(registInfo);
+                }
             } else {
-                // 更新失败，说明有其他请求已经更新了库存
-                throw new RuntimeException("挂号失败，当前号源已被抢完");
+                // 获取锁失败，可以在这里处理重试逻辑或者直接返回错误信息
+                throw new RuntimeException("挂号失败，当前操作过于频繁，请稍后再试");
             }
-        } else {
-            throw new RuntimeException("挂号失败，当前号源已被抢完");
+        } finally {
+            // 释放锁
+            redisLockUtils.unlock(lockKey, lockValue);
         }
     }
 
@@ -149,6 +140,12 @@ public class PatientServiceImpl implements PatientService {
         List<RegistInfo> list = registInfoDao.findByPatientName(patientName);
         return list;
     }
+
+//    @Override
+//    public List<CallInfo> showApprovedCall() {
+//        System.out.println("查询数据库");
+//        return callInfoDao.findByApproved(1);
+//    }
 
     public List<CallInfo> showApprovedCall() {
         List<CallInfo> list = new ArrayList<>();
@@ -189,11 +186,5 @@ public class PatientServiceImpl implements PatientService {
             String key = "callInfo:" + callInfo.getId();
             redisCacheUtils.set(key, callInfo, 60, TimeUnit.MINUTES); // 缓存有效期为60分钟
         }
-    }
-
-    @Override
-    public int getCallInfoQuantity(Long callInfoId) {
-        CallInfo callInfo = callInfoDao.findById(callInfoId).orElse(null);
-        return callInfo.getQuantity();
     }
 }

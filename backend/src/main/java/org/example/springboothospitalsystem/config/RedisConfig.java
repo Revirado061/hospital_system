@@ -9,17 +9,12 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 @Configuration
 public class RedisConfig {
-
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory redisConnectionFactory) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(redisConnectionFactory);
-
-        // 设置键（Key）的序列化方式
         template.setKeySerializer(new StringRedisSerializer());
-        // 设置值（Value）的序列化方式
         template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
-
         return template;
     }
 }

@@ -16,15 +16,7 @@ public class CallInfo {
     private String timeFrame;
     private int quantity;  //挂号数量
     private int approved;  //是否审核通过
-    private int version;
 
-    public int getVersion() {
-        return version;
-    }
-
-    public void setVersion(int version) {
-        this.version = version;
-    }
 
     public CallInfo() {
     }
