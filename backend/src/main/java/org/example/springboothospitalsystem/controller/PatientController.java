@@ -77,21 +77,6 @@ public class PatientController {
         return new Result<>(list);
     }
 
-//    @GetMapping("/allCall") // 展示所有approved==1的号源
-//    public Result<List<CallInfo>> allCallController() {
-//        List<CallInfo> list = new ArrayList<>();
-//        Set<String> keys = redisCacheUtils.keys("callInfo:*");
-//        if (keys != null) {
-//            for (String key : keys) {
-//                CallInfo callInfo = (CallInfo) redisCacheUtils.get(key);
-//                if (callInfo != null) {
-//                    list.add(callInfo);
-//                }
-//            }
-//        }
-//        return new Result<>(list);
-//    }
-
     @RequestMapping("/filter") //筛选挂号信息
     public Result<List> filterController(@RequestParam("date") String date,
                                  @RequestParam("department") String department,
