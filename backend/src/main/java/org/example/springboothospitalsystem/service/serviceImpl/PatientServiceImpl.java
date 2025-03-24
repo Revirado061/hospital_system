@@ -8,10 +8,13 @@ import org.example.springboothospitalsystem.repository.LogDao;
 import org.example.springboothospitalsystem.repository.PatientDao;
 import org.example.springboothospitalsystem.repository.RegistInfoDao;
 import org.example.springboothospitalsystem.service.PatientService;
+import org.example.springboothospitalsystem.utils.KafkaConsumer;
+import org.example.springboothospitalsystem.utils.KafkaProducer;
 import org.example.springboothospitalsystem.utils.RedisCacheUtils;
 import org.example.springboothospitalsystem.utils.RedisLockUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -33,19 +36,22 @@ public class PatientServiceImpl implements PatientService {
     private LogDao logDao;
     @Resource
     private RedisCacheUtils redisCacheUtils;
-
     @Resource
     private RedisLockUtils redisLockUtils;
+    @Resource
+    private KafkaProducer kafkaProducer;
 
     @Autowired
-    public PatientServiceImpl(PatientDao patientDao, CallInfoDao callInfoDao, RegistInfoDao registInfoDao, LogDao logDao, RedisCacheUtils redisCacheUtils, RedisLockUtils redisLockUtils) {
+    public PatientServiceImpl(PatientDao patientDao, CallInfoDao callInfoDao, RegistInfoDao registInfoDao, LogDao logDao, RedisCacheUtils redisCacheUtils, RedisLockUtils redisLockUtils, KafkaProducer kafkaProducer) {
         this.patientDao = patientDao;
         this.callInfoDao = callInfoDao;
         this.registInfoDao = registInfoDao;
         this.logDao = logDao;
         this.redisCacheUtils = redisCacheUtils;
         this.redisLockUtils = redisLockUtils;
+        this.kafkaProducer = kafkaProducer;
     }
+
 
     @Override
     public Patient getInfo(String account) {
@@ -93,6 +99,7 @@ public class PatientServiceImpl implements PatientService {
     }
 
     @Override
+    @Transactional
     public void guahao(Long id, String account) {
         String lockKey = "lock:callInfo:" + id; // 锁的键
         String lockValue = UUID.randomUUID().toString(); // 锁的值，用于标识锁的持有者
@@ -113,11 +120,17 @@ public class PatientServiceImpl implements PatientService {
                     String doctorName = callInfo.getName();
                     RegistInfo registInfo = new RegistInfo(date, timeFrame, department, patientName, doctorName, registerTime);
                     registInfoDao.save(registInfo);
+                    System.out.println("Successfully processed guahao request for id: " + id + " and account: " + account);
+                } else {
+                    System.err.println("No available slots or callInfo not found for id: " + id);
                 }
             } else {
                 // 获取锁失败，可以在这里处理重试逻辑或者直接返回错误信息
-                throw new RuntimeException("挂号失败，当前操作过于频繁，请稍后再试");
+                System.err.println("Failed to acquire lock for id: " + id);
             }
+        } catch (Exception e) {
+            System.err.println("Error processing guahao request: " + e.getMessage());
+            e.printStackTrace();
         } finally {
             // 释放锁
             redisLockUtils.unlock(lockKey, lockValue);
@@ -140,12 +153,6 @@ public class PatientServiceImpl implements PatientService {
         List<RegistInfo> list = registInfoDao.findByPatientName(patientName);
         return list;
     }
-
-//    @Override
-//    public List<CallInfo> showApprovedCall() {
-//        System.out.println("查询数据库");
-//        return callInfoDao.findByApproved(1);
-//    }
 
     public List<CallInfo> showApprovedCall() {
         List<CallInfo> list = new ArrayList<>();
