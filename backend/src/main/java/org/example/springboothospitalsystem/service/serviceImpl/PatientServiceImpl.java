@@ -1,5 +1,6 @@
 package org.example.springboothospitalsystem.service.serviceImpl;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import org.example.springboothospitalsystem.domain.*;
 import org.example.springboothospitalsystem.repository.CallInfoDao;
@@ -7,20 +8,30 @@ import org.example.springboothospitalsystem.repository.LogDao;
 import org.example.springboothospitalsystem.repository.PatientDao;
 import org.example.springboothospitalsystem.repository.RegistInfoDao;
 import org.example.springboothospitalsystem.service.PatientService;
+import org.example.springboothospitalsystem.utils.RedisCacheUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.Set;
 
 @Service
 public class PatientServiceImpl implements PatientService {
     @Resource
     private PatientDao patientDao;
+    @Resource
     private CallInfoDao callInfoDao;
+    @Resource
     private RegistInfoDao registInfoDao;
+    @Resource
     private LogDao logDao;
+
+    @Autowired
+    private RedisCacheUtils redisCacheUtils;
 
     public PatientServiceImpl(PatientDao patientDao, CallInfoDao callInfoDao, RegistInfoDao registInfoDao, LogDao logDao) {
         this.patientDao = patientDao;
@@ -37,10 +48,8 @@ public class PatientServiceImpl implements PatientService {
 
     @Override
     public Patient loginService(String account, String password) {
-        // 如果账号密码都对则返回登录的用户对象，若有一个错误则返回null
         Patient patient = patientDao.findByAccountAndPassword(account, password);
-        // 重要信息置空
-        if(patient != null){
+        if (patient != null) {
             patient.setPassword("");
         }
         return patient;
@@ -48,11 +57,9 @@ public class PatientServiceImpl implements PatientService {
 
     @Override
     public Patient registService(Patient patient) {
-        if(patientDao.findByAccount(patient.getAccount())!=null) {
-            // 无法注册
+        if (patientDao.findByAccount(patient.getAccount()) != null) {
             return null;
-        }
-        else {
+        } else {
             Patient newPatient = patientDao.save(patient);
             if (newPatient != null) {
                 newPatient.setPassword("");
@@ -61,11 +68,9 @@ public class PatientServiceImpl implements PatientService {
         }
     }
 
-
-
     @Override
     public void change(String account, String password, String ID, String name, String address, String phone,
-                       int age, String sex, String record){
+                       int age, String sex, String record) {
         Patient patient = patientDao.findByAccount(account);
         patient.setPassword(password);
         patient.setID(ID);
@@ -81,10 +86,9 @@ public class PatientServiceImpl implements PatientService {
     }
 
     @Override
-    /*挂号*/
-    public void guahao(Long id, String account){
+    public void guahao(Long id, String account) {
         CallInfo callInfo = callInfoDao.findById(id).orElse(null);
-        if(callInfo != null){
+        if (callInfo != null) {
             callInfo.setQuantity(callInfo.getQuantity() - 1);
             callInfoDao.save(callInfo);
             LocalDateTime today = LocalDateTime.now();
@@ -101,7 +105,7 @@ public class PatientServiceImpl implements PatientService {
     }
 
     @Override
-    public List<RegistInfo> getLog(){
+    public List<RegistInfo> getLog() {
         return registInfoDao.findAll();
     }
 
@@ -117,21 +121,50 @@ public class PatientServiceImpl implements PatientService {
         return list;
     }
 
-    @Override
+//    @Override
+//    public List<CallInfo> showApprovedCall() {
+//        System.out.println("查询数据库");
+//        return callInfoDao.findByApproved(1);
+//    }
+
     public List<CallInfo> showApprovedCall() {
-        return callInfoDao.findByApproved(1);
+        List<CallInfo> list = new ArrayList<>();
+        Set<String> keys = redisCacheUtils.keys("callInfo:*");
+        if (keys != null) {
+            for (String key : keys) {
+                CallInfo callInfo = (CallInfo) redisCacheUtils.get(key);
+                if (callInfo != null) {
+                    list.add(callInfo);
+                }
+            }
+        }
+        return list;
     }
+
 
     @Override
     public List<CallInfo> callInfoFilter(String date, String department, String doctorName) {
         List<CallInfo> list = callInfoDao.findByDateAndDepartmentAndName(date, department, doctorName);
         List<CallInfo> result = new ArrayList<>();
-        for(CallInfo callInfo : list){
-            if(callInfo.getApproved() == 1){
+        for (CallInfo callInfo : list) {
+            if (callInfo.getApproved() == 1) {
                 result.add(callInfo);
             }
         }
         return result;
     }
 
+    @PostConstruct
+    public void init() {
+        preheatCache();
+    }
+
+    @Override
+    public void preheatCache() {
+        List<CallInfo> callInfos = callInfoDao.findByApproved(1);
+        for (CallInfo callInfo : callInfos) {
+            String key = "callInfo:" + callInfo.getId();
+            redisCacheUtils.set(key, callInfo, 60, TimeUnit.MINUTES); // 缓存有效期为60分钟
+        }
+    }
 }

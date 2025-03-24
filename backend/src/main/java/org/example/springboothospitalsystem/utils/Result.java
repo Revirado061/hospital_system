@@ -1,5 +1,7 @@
 package org.example.springboothospitalsystem.utils;
 
+import java.util.Collection;
+
 /**
  * 工具类Result的作用是作为返回给前端的统一后的对象。是个模板类。
  * 也就是说返回给前端的都是Result对象，只是对象中的属性不太一样，

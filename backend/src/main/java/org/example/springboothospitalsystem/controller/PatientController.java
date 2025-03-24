@@ -3,11 +3,14 @@ package org.example.springboothospitalsystem.controller;
 import jakarta.annotation.Resource;
 import org.example.springboothospitalsystem.domain.*;
 import org.example.springboothospitalsystem.service.PatientService;
+import org.example.springboothospitalsystem.utils.RedisCacheUtils;
 import org.example.springboothospitalsystem.utils.Result;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/patient")  //是这个控制器类的基路由
@@ -15,6 +18,8 @@ public class PatientController {
 
     @Resource
     private PatientService patientService;
+    @Resource
+    private RedisCacheUtils redisCacheUtils;
 
     @PostMapping("/getInfo")  //获取本账号的基本信息
     public Result<Patient> getInfoController(@RequestParam("account") String account){
@@ -71,6 +76,21 @@ public class PatientController {
         List<CallInfo> list = patientService.showApprovedCall();
         return new Result<>(list);
     }
+
+//    @GetMapping("/allCall") // 展示所有approved==1的号源
+//    public Result<List<CallInfo>> allCallController() {
+//        List<CallInfo> list = new ArrayList<>();
+//        Set<String> keys = redisCacheUtils.keys("callInfo:*");
+//        if (keys != null) {
+//            for (String key : keys) {
+//                CallInfo callInfo = (CallInfo) redisCacheUtils.get(key);
+//                if (callInfo != null) {
+//                    list.add(callInfo);
+//                }
+//            }
+//        }
+//        return new Result<>(list);
+//    }
 
     @RequestMapping("/filter") //筛选挂号信息
     public Result<List> filterController(@RequestParam("date") String date,
